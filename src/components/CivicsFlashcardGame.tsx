@@ -9,7 +9,6 @@ interface CivicsQuestion {
 
 const CivicsFlashcardGame = () => {
   const [currentCardIndex, setCurrentCardIndex] = useState<number>(0);
-  const [showAnswer, setShowAnswer] = useState<boolean>(false);
   const [hearts, setHearts] = useState<number>(5);
   const [progress, setProgress] = useState<number>(1);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -679,7 +678,6 @@ const CivicsFlashcardGame = () => {
   };
 
   const nextCard = () => {
-    setShowAnswer(false);
     setCurrentCardIndex((prev) => (prev + 1) % filteredQuestions.length);
   };
 
@@ -687,7 +685,6 @@ const CivicsFlashcardGame = () => {
     setCurrentCardIndex(0);
     setHearts(5);
     setProgress(1);
-    setShowAnswer(false);
     setSelectedAnswer(null);
     setIsCorrect(null);
   };
