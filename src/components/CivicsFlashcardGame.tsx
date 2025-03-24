@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './CivicsFlashcardGame.css';
 import DetailedExplanation from './DetailedExplanation';
 import { detailedExplanations } from '../data/detailedExplanations';
@@ -770,13 +770,56 @@ const CivicsFlashcardGame = () => {
   const categories = ['All', ...uniqueCategories];
 
   // Filter questions based on category and difficulty
-  const filteredQuestions = civicsQuestionsWithHints.filter(q => {
-    // Only filter by category, not by difficulty
-    return categoryFilter === 'All' || q.category === categoryFilter;
-  }).map(q => shuffleQuestionOptions(q)); // Shuffle options for each question
+  const filteredQuestions = useMemo(() => {
+    return civicsQuestionsWithHints
+      .filter(q => {
+        // Only filter by category, not by difficulty
+        return categoryFilter === 'All' || q.category === categoryFilter;
+      })
+      .map(q => shuffleQuestionOptions(q)); // Shuffle options for each question
+  }, [categoryFilter]);
 
-  // Get current card
-  const currentCard = filteredQuestions[currentCardIndex];
+  // Get current card with pre-shuffled options
+  const currentCard = useMemo(() => {
+    if (currentCardIndex >= 0 && currentCardIndex < filteredQuestions.length) {
+      return filteredQuestions[currentCardIndex];
+    }
+    return null;
+  }, [filteredQuestions, currentCardIndex]);
+
+  // Function to handle next card
+  const handleNextCard = () => {
+    // Trigger exit animation
+    setAnimationClass('card-exit');
+    
+    // Set a loading state to prevent showing unshuffled options
+    setIsLoading(true);
+    
+    setTimeout(() => {
+      if (currentCardIndex < filteredQuestions.length - 1) {
+        setCurrentCardIndex(prevIndex => prevIndex + 1);
+      } else {
+        // Loop back to the first question when reaching the end
+        setCurrentCardIndex(0);
+      }
+      // Reset hint state for the next card
+      setShowHint(false);
+      setHintPenalty(false);
+      
+      // Reset timer for the next question if in timed mode
+      if (timedMode) {
+        resetTimer();
+      }
+      
+      // Trigger enter animation for the new card
+      setAnimationClass('card-enter');
+      
+      // Short delay to ensure options are properly shuffled before showing
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 100);
+    }, 500);
+  };
 
   // Handle difficulty change
   const handleDifficultyChange = (difficulty: DifficultyLevel) => {
@@ -859,33 +902,7 @@ const CivicsFlashcardGame = () => {
     setHearts(0);
   };
 
-  // Function to handle next card
-  const handleNextCard = () => {
-    // Trigger exit animation
-    setAnimationClass('card-exit');
-    
-    setTimeout(() => {
-      if (currentCardIndex < filteredQuestions.length - 1) {
-        setCurrentCardIndex(prevIndex => prevIndex + 1);
-      } else {
-        // Loop back to the first question when reaching the end
-        setCurrentCardIndex(0);
-      }
-      // Reset hint state for the next card
-      setShowHint(false);
-      setHintPenalty(false);
-      
-      // Reset timer for the next question if in timed mode
-      if (timedMode) {
-        resetTimer();
-      }
-      
-      // Trigger enter animation for the new card
-      setAnimationClass('card-enter');
-    }, 500);
-  };
-
-  // Handle option click
+  // Function to handle option click
   const handleOptionClick = (option: string) => {
     if (selectedAnswer !== null) return; // Prevent multiple selections
     
@@ -949,9 +966,28 @@ const CivicsFlashcardGame = () => {
 
   // Handle category change
   const handleCategoryChange = (category: string) => {
+    // Set loading state to prevent showing unshuffled options
+    setIsLoading(true);
+    
+    // Only update the category filter and reset the card index
     setCategoryFilter(category);
     setCurrentCardIndex(0);
-    resetGame();
+    
+    // Reset selected answer and correct/incorrect state
+    setSelectedAnswer(null);
+    setIsCorrect(null);
+    
+    // Reset hint state for the new category
+    setShowHint(false);
+    setHintPenalty(false);
+    
+    // Trigger enter animation for the first card in the new category
+    setAnimationClass('card-enter');
+    
+    // Short delay to ensure options are properly shuffled before showing
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 300);
   };
 
   // Clear saved progress
@@ -1151,8 +1187,15 @@ const CivicsFlashcardGame = () => {
   // Set initial animation on first render
   useEffect(() => {
     if (isFirstRender.current) {
-      setAnimationClass('card-enter');
-      isFirstRender.current = false;
+      // Set loading state to prevent showing unshuffled options
+      setIsLoading(true);
+      
+      // Short delay to ensure options are properly shuffled before showing
+      setTimeout(() => {
+        setAnimationClass('card-enter');
+        setIsLoading(false);
+        isFirstRender.current = false;
+      }, 300);
     }
   }, []);
 
@@ -1407,7 +1450,7 @@ const CivicsFlashcardGame = () => {
             {hearts > 0 ? (
               <div className={`card-container ${animationClass}`}>
                 {/* Card */}
-                {currentCard ? (
+                {currentCard && !isLoading ? (
                   <article className="card" role="group" aria-label="Flashcard question">
                     <div className="card-body">
                       <h2 className="card-title" id="question-text">{currentCard.question}</h2>
@@ -1526,11 +1569,8 @@ const CivicsFlashcardGame = () => {
                     </div>
                   </article>
                 ) : (
-                  <div className="card" role="alert">
-                    <div className="card-body">
-                      <h2 className="card-title">No questions available for this category</h2>
-                      <p className="empty-category-message">Please select a different category</p>
-                    </div>
+                  <div className="loading-spinner-container" aria-label="Loading next question">
+                    <div className="loading-spinner" aria-hidden="true"></div>
                   </div>
                 )}
               </div>
