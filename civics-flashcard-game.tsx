@@ -694,7 +694,7 @@ const CivicsFlashcardGame = () => {
         <div className="text-gray-400 text-3xl">✕</div>
         <div className="w-40 h-2 bg-gray-200 rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
+            className={`h-full bg-blue-500 progress-width progress-${Math.round(progress)}`}></div>
         </div>
         <div className="flex">
           {Array.from({ length: hearts }).map((_, i) => (
