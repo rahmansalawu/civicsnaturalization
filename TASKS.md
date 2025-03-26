@@ -23,6 +23,7 @@
 - [x] Task 4.2: Implement hint system
 - [ ] Task 4.3: Create review mode for incorrect answers
 - [x] Task 4.4: Add timed challenge mode
+- [x] Task 4.5: Remove category filtering and randomize questions
 
 ## Priority 5: Technical Improvements (Complex)
 - [ ] Task 5.1: Refactor state management with React Context

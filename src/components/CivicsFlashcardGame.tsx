@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import './CivicsFlashcardGame.css';
 import DetailedExplanation from './DetailedExplanation';
 import { detailedExplanations } from '../data/detailedExplanations';
+import SettingsModal from './SettingsModal';
 
 // Define difficulty levels
 type DifficultyLevel = 'easy' | 'medium' | 'hard';
@@ -23,7 +24,6 @@ interface GameState {
   progress: number;
   score: number;
   questionsAttempted: number;
-  categoryFilter: string;
   darkMode: boolean; // Add dark mode to saved state
   difficultyLevel: DifficultyLevel; // Add difficulty level to saved state
   hintsUsed: number; // Track how many hints the user has used
@@ -46,7 +46,6 @@ const CivicsFlashcardGame = () => {
         progress: 1,
         score: 0,
         questionsAttempted: 0,
-        categoryFilter: 'All',
         darkMode: false, // Default to light mode
         difficultyLevel: 'medium', // Default to medium difficulty
         hintsUsed: 0, // Initialize hints used counter
@@ -59,7 +58,6 @@ const CivicsFlashcardGame = () => {
   const [progress, setProgress] = useState<number>(initialState.progress);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<string>(initialState.categoryFilter);
   const [score, setScore] = useState<number>(initialState.score);
   const [questionsAttempted, setQuestionsAttempted] = useState<number>(initialState.questionsAttempted);
   const [saveNotification, setSaveNotification] = useState<boolean>(false);
@@ -72,6 +70,7 @@ const CivicsFlashcardGame = () => {
   const [timedMode, setTimedMode] = useState<boolean>(initialState.timedMode);
   const [timeRemaining, setTimeRemaining] = useState<number>(initialState.timeRemaining);
   const [timerActive, setTimerActive] = useState<boolean>(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
   
   // Ref to track if this is the first render
   const isFirstRender = useRef(true);
@@ -764,32 +763,69 @@ const CivicsFlashcardGame = () => {
   // Ensure all questions have hints
   const civicsQuestionsWithHints = ensureQuestionsHaveHints(civicsQuestionsWithDifficulty);
 
-  // Get unique categories from questions
-  const uniqueCategories = civicsQuestionsWithHints.map(q => q.category)
-    .filter((value, index, self) => self.indexOf(value) === index);
-  const categories = ['All', ...uniqueCategories];
-
-  // Filter questions based on category and difficulty
+  // Filter questions based on difficulty level
   const filteredQuestions = useMemo(() => {
-    return civicsQuestionsWithHints
-      .filter(q => {
-        // Only filter by category, not by difficulty
-        return categoryFilter === 'All' || q.category === categoryFilter;
-      })
-      .map(q => shuffleQuestionOptions(q)); // Shuffle options for each question
-  }, [categoryFilter]);
+    let filtered = [...civicsQuestionsWithHints];
+    
+    // Apply difficulty filtering
+    if (difficultyLevel === 'easy') {
+      filtered = filtered.filter(q => !q.difficulty || q.difficulty === 'easy');
+    } else if (difficultyLevel === 'medium') {
+      filtered = filtered.filter(q => !q.difficulty || q.difficulty === 'easy' || q.difficulty === 'medium');
+    }
+    
+    // Randomize questions at the start of each game
+    return shuffleArray(filtered);
+  }, [difficultyLevel]);
 
   // Get current card with pre-shuffled options
   const currentCard = useMemo(() => {
-    if (currentCardIndex >= 0 && currentCardIndex < filteredQuestions.length) {
-      return filteredQuestions[currentCardIndex];
+    if (filteredQuestions.length === 0 || currentCardIndex >= filteredQuestions.length) {
+      return null;
     }
-    return null;
+    
+    // Get the current question
+    const question = filteredQuestions[currentCardIndex];
+    
+    // Return a new question object with shuffled options
+    return {
+      ...question,
+      options: shuffleArray([...question.options])
+    };
   }, [filteredQuestions, currentCardIndex]);
 
+  // Function to handle game over
+  const handleGameOver = useCallback(() => {
+    setTimerActive(false); // Stop the timer
+    // Show game over screen
+    setHearts(0);
+  }, []);
+
+  // Function to set time based on difficulty level
+  const getTimeForDifficulty = (): number => {
+    switch (difficultyLevel) {
+      case 'easy':
+        return 30; // 30 seconds for easy
+      case 'medium':
+        return 20; // 20 seconds for medium
+      case 'hard':
+        return 15; // 15 seconds for hard
+      default:
+        return 20;
+    }
+  };
+
+  // Reset timer function
+  const resetTimer = useCallback(() => {
+    if (timedMode) {
+      setTimeRemaining(getTimeForDifficulty());
+      setTimerActive(true);
+    }
+  }, [timedMode, getTimeForDifficulty]);
+
   // Function to handle next card
-  const handleNextCard = () => {
-    // Trigger exit animation
+  const handleNextCard = useCallback(() => {
+    // Set animation class for exit animation
     setAnimationClass('card-exit');
     
     // Set a loading state to prevent showing unshuffled options
@@ -819,88 +855,27 @@ const CivicsFlashcardGame = () => {
         setIsLoading(false);
       }, 100);
     }, 500);
-  };
+  }, [currentCardIndex, filteredQuestions.length, timedMode, resetTimer]);
 
-  // Handle difficulty change
-  const handleDifficultyChange = (difficulty: DifficultyLevel) => {
-    setDifficultyLevel(difficulty);
-    
-    // Reset game with new difficulty
-    setCurrentCardIndex(0);
+  // Handle time up event
+  const handleTimeUp = useCallback(() => {
+    console.log('Time up!');
+    setTimerActive(false);
+    setHearts(prevHearts => Math.max(prevHearts - 1, 0));
     setSelectedAnswer(null);
-    setIsCorrect(null);
-    setProgress(1);
-    setScore(0);
-    setQuestionsAttempted(0);
-    setHintsUsed(0);
-    setShowHint(false);
-    setHintPenalty(false);
+    setIsCorrect(false);
     
-    // Set hearts based on difficulty level
-    if (difficulty === 'easy') {
-      setHearts(7); // More hearts for easy mode
-    } else if (difficulty === 'medium') {
-      setHearts(5); // Default hearts for medium mode
+    // Check if game over
+    if (hearts <= 1) {
+      // Game over
+      handleGameOver();
     } else {
-      setHearts(3); // Fewer hearts for hard mode
+      // Move to next question after delay
+      setTimeout(() => {
+        handleNextCard();
+      }, 2500);
     }
-    
-    // Reset timer with appropriate time for the difficulty
-    if (timedMode) {
-      // Set the time based on the new difficulty level
-      let newTime = 20; // Default for medium
-      
-      if (difficulty === 'easy') {
-        newTime = 30;
-      } else if (difficulty === 'medium') {
-        newTime = 20;
-      } else {
-        newTime = 15;
-      }
-      
-      console.log(`Setting timer to ${newTime} seconds for ${difficulty} difficulty`);
-      setTimeRemaining(newTime);
-      setTimerActive(true);
-    }
-    
-    // Trigger enter animation for the first card
-    setAnimationClass('card-enter');
-  };
-
-  // Reset game with current settings
-  const resetGame = () => {
-    setCurrentCardIndex(0);
-    setSelectedAnswer(null);
-    setIsCorrect(null);
-    setProgress(1);
-    setScore(0);
-    setQuestionsAttempted(0);
-    setHintsUsed(0);
-    setShowHint(false);
-    setHintPenalty(false);
-    
-    // Set hearts based on difficulty level
-    if (difficultyLevel === 'easy') {
-      setHearts(7); // More hearts for easy mode
-    } else if (difficultyLevel === 'medium') {
-      setHearts(5); // Default hearts for medium mode
-    } else {
-      setHearts(3); // Fewer hearts for hard mode
-    }
-    
-    // Reset timer if in timed mode
-    if (timedMode) {
-      setTimeRemaining(getTimeForDifficulty());
-      setTimerActive(true);
-    }
-  };
-
-  // Function to handle game over
-  const handleGameOver = () => {
-    setTimerActive(false); // Stop the timer
-    // Show game over screen
-    setHearts(0);
-  };
+  }, [hearts, handleGameOver, handleNextCard]);
 
   // Function to handle option click
   const handleOptionClick = (option: string) => {
@@ -951,43 +926,20 @@ const CivicsFlashcardGame = () => {
   const handleContinue = () => {
     if (!currentCard) return;
     
-    if (isCorrect) {
-      setProgress(prev => Math.min(prev + 1, 100));
-      handleNextCard();
-    } else {
-      // Lose a heart for incorrect answer (should already be deducted in handleOptionClick)
-      if (hearts > 1) {
+    // Only proceed if an answer has been selected (isCorrect is not null)
+    if (isCorrect !== null) {
+      if (isCorrect) {
+        setProgress(prev => Math.min(prev + 1, 100));
         handleNextCard();
+      } else {
+        // Lose a heart for incorrect answer (should already be deducted in handleOptionClick)
+        if (hearts > 1) {
+          handleNextCard();
+        }
       }
+      setSelectedAnswer(null);
+      setIsCorrect(null);
     }
-    setSelectedAnswer(null);
-    setIsCorrect(null);
-  };
-
-  // Handle category change
-  const handleCategoryChange = (category: string) => {
-    // Set loading state to prevent showing unshuffled options
-    setIsLoading(true);
-    
-    // Only update the category filter and reset the card index
-    setCategoryFilter(category);
-    setCurrentCardIndex(0);
-    
-    // Reset selected answer and correct/incorrect state
-    setSelectedAnswer(null);
-    setIsCorrect(null);
-    
-    // Reset hint state for the new category
-    setShowHint(false);
-    setHintPenalty(false);
-    
-    // Trigger enter animation for the first card in the new category
-    setAnimationClass('card-enter');
-    
-    // Short delay to ensure options are properly shuffled before showing
-    setTimeout(() => {
-      setIsLoading(false);
-    }, 300);
   };
 
   // Clear saved progress
@@ -1036,99 +988,12 @@ const CivicsFlashcardGame = () => {
     }
   }, [darkMode]);
 
-  // Timer effect
-  useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
-    
-    // Only run timer if timed mode is active and timer is active
-    if (timedMode && timerActive && timeRemaining > 0) {
-      console.log('Starting timer with', timeRemaining, 'seconds');
-      timer = setInterval(() => {
-        setTimeRemaining(prevTime => {
-          const newTime = prevTime - 1;
-          console.log('Timer tick:', newTime);
-          if (newTime <= 0) {
-            // Time's up - handle game over
-            handleTimeUp();
-            return 0;
-          }
-          return newTime;
-        });
-      }, 1000);
-    }
-    
-    return () => {
-      if (timer) {
-        console.log('Clearing timer');
-        clearInterval(timer);
-      }
-    };
-  }, [timedMode, timerActive]); // Remove timeRemaining from dependencies to prevent re-creating interval on every tick
-
-  // Handle time up event
-  const handleTimeUp = () => {
-    console.log('Time up!');
-    setTimerActive(false);
-    setHearts(prevHearts => Math.max(prevHearts - 1, 0));
-    setSelectedAnswer(null);
-    setIsCorrect(false);
-    
-    // Check if game over
-    if (hearts <= 1) {
-      // Game over
-      handleGameOver();
-    } else {
-      // Move to next question after delay
-      setTimeout(() => {
-        handleNextCard();
-      }, 2500);
-    }
-  };
-
-  // Toggle timed mode
-  const toggleTimedMode = () => {
-    const newTimedMode = !timedMode;
-    setTimedMode(newTimedMode);
-    
-    // Reset timer when toggling
-    if (newTimedMode) {
-      // Set time based on current difficulty
-      setTimeRemaining(getTimeForDifficulty());
-      // Activate the timer immediately
-      setTimerActive(true);
-    } else {
-      setTimerActive(false);
-    }
-  };
-
   // Add time bonus for correct answer
   const addTimeBonus = () => {
     if (timedMode) {
       // Add bonus based on difficulty
       const bonus = difficultyLevel === 'easy' ? 5 : difficultyLevel === 'medium' ? 3 : 2;
       setTimeRemaining(prevTime => prevTime + bonus);
-    }
-  };
-
-  // Reset timer function
-  const resetTimer = () => {
-    if (timedMode) {
-      setTimeRemaining(getTimeForDifficulty());
-      setTimerActive(true);
-    }
-  };
-
-  // Function to set time based on difficulty level
-  const getTimeForDifficulty = (): number => {
-    switch (difficultyLevel) {
-      case 'easy':
-        return 30; // 30 seconds for easy
-      case 'medium':
-        return 20; // 20 seconds for medium
-      case 'hard':
-        return 15; // 15 seconds for hard
-      default:
-        return 20;
     }
   };
 
@@ -1140,7 +1005,6 @@ const CivicsFlashcardGame = () => {
       progress,
       score,
       questionsAttempted,
-      categoryFilter,
       darkMode, // Include dark mode in saved state
       difficultyLevel, // Include difficulty level in saved state
       hintsUsed, // Include hints used in saved state
@@ -1157,7 +1021,7 @@ const CivicsFlashcardGame = () => {
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [currentCardIndex, hearts, progress, score, questionsAttempted, categoryFilter, darkMode, difficultyLevel, hintsUsed, timedMode, timeRemaining]);
+  }, [currentCardIndex, hearts, progress, score, questionsAttempted, darkMode, difficultyLevel, hintsUsed, timedMode, timeRemaining]);
 
   // Set initial theme on first render
   useEffect(() => {
@@ -1252,24 +1116,145 @@ const CivicsFlashcardGame = () => {
     setShowHint(false);
   };
 
+  // Handle difficulty change
+  const handleDifficultyChange = (difficulty: DifficultyLevel) => {
+    setIsLoading(true);
+    setDifficultyLevel(difficulty);
+    
+    // Reset game state for new difficulty
+    setCurrentCardIndex(0);
+    setSelectedAnswer(null);
+    setIsCorrect(null);
+    setShowHint(false);
+    setHintPenalty(false);
+    
+    // Set hearts based on difficulty
+    if (difficulty === 'easy') {
+      setHearts(7);
+    } else if (difficulty === 'medium') {
+      setHearts(5);
+    } else {
+      setHearts(3);
+    }
+    
+    // Set time based on difficulty if timed mode is enabled
+    if (timedMode) {
+      if (difficulty === 'easy') {
+        setTimeRemaining(30);
+      } else if (difficulty === 'medium') {
+        setTimeRemaining(20);
+      } else {
+        setTimeRemaining(15);
+      }
+    }
+    
+    // Reset progress
+    setProgress(1);
+    setScore(0);
+    setQuestionsAttempted(0);
+    setHintsUsed(0);
+    
+    // Trigger enter animation for the first card
+    setAnimationClass('card-enter');
+    
+    // Short delay to ensure options are properly shuffled before showing
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 300);
+  };
+
+  // Reset game with current settings
+  const resetGame = () => {
+    setCurrentCardIndex(0);
+    setSelectedAnswer(null);
+    setIsCorrect(null);
+    setProgress(1);
+    setScore(0);
+    setQuestionsAttempted(0);
+    setHintsUsed(0);
+    setShowHint(false);
+    setHintPenalty(false);
+    
+    // Set hearts based on difficulty level
+    if (difficultyLevel === 'easy') {
+      setHearts(7); // More hearts for easy mode
+    } else if (difficultyLevel === 'medium') {
+      setHearts(5); // Default hearts for medium mode
+    } else {
+      setHearts(3); // Fewer hearts for hard mode
+    }
+    
+    // Reset timer if in timed mode
+    if (timedMode) {
+      setTimeRemaining(getTimeForDifficulty());
+      setTimerActive(true);
+    }
+  };
+
+  // Toggle timed mode
+  const toggleTimedMode = () => {
+    const newTimedMode = !timedMode;
+    setTimedMode(newTimedMode);
+    
+    // Reset timer when toggling
+    if (newTimedMode) {
+      // Set time based on current difficulty
+      setTimeRemaining(getTimeForDifficulty());
+      // Activate the timer immediately
+      setTimerActive(true);
+    } else {
+      setTimerActive(false);
+    }
+  };
+
+  // Timer effect
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    
+    // Only run timer if timed mode is active and timer is active
+    if (timedMode && timerActive && timeRemaining > 0) {
+      console.log('Starting timer with', timeRemaining, 'seconds');
+      timer = setInterval(() => {
+        setTimeRemaining(prevTime => {
+          const newTime = prevTime - 1;
+          console.log('Timer tick:', newTime);
+          if (newTime <= 0) {
+            // Time's up - handle game over
+            handleTimeUp();
+            return 0;
+          }
+          return newTime;
+        });
+      }, 1000);
+    }
+    
+    return () => {
+      if (timer) {
+        console.log('Clearing timer');
+        clearInterval(timer);
+      }
+    };
+  }, [timedMode, timerActive, handleTimeUp]);
+
   return (
     <div className={`game-container ${darkMode ? 'dark-mode' : 'light-mode'}`} role="application" aria-label="Civics Flashcard Game">
       {/* Header */}
       <header className="game-header">
         <button 
           className="exit-button" 
-          onClick={() => window.history.back()} 
-          aria-label="Exit game"
+          onClick={resetGame} 
+          aria-label="Restart game"
           tabIndex={0}
-        >✕</button>
+        >↻</button>
         <div 
           className="progress-bar"
           aria-label="Game progress"
         >
           <div 
-            className={`progress-bar-fill progress-${progress}`}
+            className="progress-bar-fill"
+            style={{ width: `${(currentCardIndex / filteredQuestions.length) * 100}%` }}
             role="progressbar"
-            aria-valuenow={progress}
+            aria-valuenow={Math.round((currentCardIndex / filteredQuestions.length) * 100)}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-label="Game progress"
@@ -1302,6 +1287,13 @@ const CivicsFlashcardGame = () => {
             <span className="timer-toggle-text">
               {timedMode ? 'Timed' : 'Timed'}
             </span>
+          </button>
+          <button 
+            className="settings-toggle" 
+            onClick={() => setIsSettingsModalOpen(true)} 
+            aria-label="Open settings modal"
+          >
+            <span className="settings-toggle-icon" aria-hidden="true">⚙️</span>
           </button>
         </div>
       </header>
@@ -1355,10 +1347,6 @@ const CivicsFlashcardGame = () => {
               <span className="score-label">Hints Used:</span>
               <span className="score-value" aria-live="polite">{hintsUsed}</span>
             </div>
-            <div className="score-item">
-              <span className="score-label">Time Remaining:</span>
-              <span className="score-value" aria-live="polite">{timeRemaining}</span>
-            </div>
           </div>
 
           {/* Timer Display */}
@@ -1372,78 +1360,6 @@ const CivicsFlashcardGame = () => {
               <span className="timer-value" aria-live="polite">{timeRemaining}s</span>
             </div>
           )}
-
-          {/* Difficulty Selector */}
-          <div className="difficulty-selector" role="radiogroup" aria-label="Difficulty level">
-            <h3 className="difficulty-title">Difficulty Level:</h3>
-            <div className="difficulty-buttons">
-              <button 
-                className={`difficulty-button ${difficultyLevel === 'easy' ? 'difficulty-active' : ''}`}
-                onClick={() => handleDifficultyChange('easy')}
-                aria-pressed={difficultyLevel === 'easy' ? "true" : "false"}
-                aria-label="Easy difficulty"
-              >
-                Easy
-              </button>
-              <button 
-                className={`difficulty-button ${difficultyLevel === 'medium' ? 'difficulty-active' : ''}`}
-                onClick={() => handleDifficultyChange('medium')}
-                aria-pressed={difficultyLevel === 'medium' ? "true" : "false"}
-                aria-label="Medium difficulty"
-              >
-                Medium
-              </button>
-              <button 
-                className={`difficulty-button ${difficultyLevel === 'hard' ? 'difficulty-active' : ''}`}
-                onClick={() => handleDifficultyChange('hard')}
-                aria-pressed={difficultyLevel === 'hard' ? "true" : "false"}
-                aria-label="Hard difficulty"
-              >
-                Hard
-              </button>
-            </div>
-            <p className="difficulty-description">
-              {difficultyLevel === 'easy' 
-                ? 'Easy mode: More hearts (7), simpler questions.' 
-                : difficultyLevel === 'medium' 
-                  ? 'Medium mode: Standard hearts (5), mixed questions.' 
-                  : 'Hard mode: Fewer hearts (3), all questions included.'}
-            </p>
-          </div>
-
-          {/* Category Filter */}
-          <nav className="category-filter" aria-label="Category filters">
-            <div className="category-buttons">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => handleCategoryChange(category)}
-                  className={`category-button ${
-                    categoryFilter === category
-                      ? 'category-button-active'
-                      : 'category-button-inactive'
-                  }`}
-                  tabIndex={categoryFilter === category ? 0 : -1}
-                  onKeyDown={(e) => {
-                    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                      e.preventDefault();
-                      const categoryIndex = categories.indexOf(category);
-                      const newIndex = e.key === 'ArrowRight' 
-                        ? (categoryIndex + 1) % categories.length 
-                        : (categoryIndex - 1 + categories.length) % categories.length;
-                      handleCategoryChange(categories[newIndex]);
-                      const buttons = document.querySelectorAll('.category-button');
-                      if (buttons[newIndex] instanceof HTMLElement) {
-                        (buttons[newIndex] as HTMLElement).focus();
-                      }
-                    }
-                  }}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-          </nav>
 
           {/* Main Content */}
           <main className="main-content" id="flashcard-content" role="region" aria-live="polite">
@@ -1613,6 +1529,16 @@ const CivicsFlashcardGame = () => {
       )}
 
       {/* Footer */}
+      {isSettingsModalOpen && (
+        <SettingsModal 
+          isOpen={isSettingsModalOpen} 
+          onClose={() => setIsSettingsModalOpen(false)} 
+          difficultyLevel={difficultyLevel} 
+          onDifficultyChange={handleDifficultyChange} 
+          timedMode={timedMode} 
+          onTimedModeChange={toggleTimedMode} 
+        />
+      )}
     </div>
   );
 
